@@ -4,6 +4,8 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 from tqdm import tqdm
 import os
+import sys
+sys.path.append(os.getcwd())
 from PIL import Image
 import numpy as np
 
