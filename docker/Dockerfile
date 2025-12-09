@@ -59,3 +59,11 @@ WORKDIR /home/$USERNAME/exp
 
 # Build via:
 # ./build.sh -- -t nasiri/llamagen:latest .
+# Run via:
+# docker run --rm -it --gpus "device=0" --shm-size=8g \
+#     -v $(pwd):/app \
+#     -v $(pwd)/../checkpoints:/checkpoints \
+#     -v /home/nasiri/datasets/shared/imagenet:/datasets/imagenet \
+#     -w /app \
+#     nasiri/llamagen:latest \
+#     python3 scripts/reconstruct_imagenet.py
