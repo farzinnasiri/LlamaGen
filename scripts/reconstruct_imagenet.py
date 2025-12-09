@@ -6,6 +6,7 @@ from tqdm import tqdm
 import os
 import sys
 sys.path.append(os.getcwd())
+import time
 from PIL import Image
 import numpy as np
 
@@ -94,8 +95,9 @@ def main():
     del checkpoint
 
     # Setup Output Directory
+    stamp = str(int(time.time()))
     folder_name = (f"{VQ_MODEL}-imagenet-size-{IMAGE_SIZE}-size-{IMAGE_SIZE_EVAL}"
-                   f"-codebook-size-{CODEBOOK_SIZE}-dim-{CODEBOOK_EMBED_DIM}-seed-{SEED}")
+                   f"-codebook-size-{CODEBOOK_SIZE}-dim-{CODEBOOK_EMBED_DIM}-seed-{SEED}-ts-{stamp}")
     sample_folder_dir = os.path.join(SAMPLE_DIR, folder_name)
     os.makedirs(sample_folder_dir, exist_ok=True)
     print(f"Saving samples to {sample_folder_dir}")
@@ -204,7 +206,7 @@ def main():
     print(f"MSE: {avg_mse:.6f}")
     print(f"LPIPS: {avg_lpips:.6f}")
 
-    result_file = f"{sample_folder_dir}_results.txt"
+    result_file = f"{sample_folder_dir}_results-{stamp}.txt"
     print(f"Writing results to {result_file}")
     with open(result_file, 'w') as f:
         f.write(f"PSNR: {avg_psnr:.6f}\n")
