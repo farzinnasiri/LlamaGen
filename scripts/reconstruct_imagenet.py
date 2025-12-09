@@ -33,7 +33,7 @@ CODEBOOK_SIZE = 16384
 CODEBOOK_EMBED_DIM = 8
 
 # Experiment Configuration
-SEED = 42
+SEED = 0
 
 def create_npz_from_sample_folder(sample_dir, num=50000):
     """
