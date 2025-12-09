@@ -34,7 +34,6 @@ CODEBOOK_EMBED_DIM = 8
 
 # Experiment Configuration
 SEED = 42
-DEVICE = "cuda"  # Single GPU setup
 
 def create_npz_from_sample_folder(sample_dir, num=50000):
     """
@@ -68,11 +67,7 @@ def create_npz_from_sample_folder(sample_dir, num=50000):
 def main():
     torch.set_grad_enabled(False)
     torch.manual_seed(SEED)
-    if torch.cuda.is_available():
-        torch.cuda.set_device(DEVICE)
-        device = torch.device(DEVICE)
-    else:
-        device = torch.device("cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Running on {device} with seed {SEED}")
 
 
