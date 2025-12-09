@@ -25,7 +25,7 @@ IMAGE_SIZE = 256
 IMAGE_SIZE_EVAL = 256
 BATCH_SIZE = 32
 NUM_WORKERS = 4
-MAX_SAMPLES = 100  # Set to an integer (e.g., 100) to limit processing, or None for full dataset
+MAX_SAMPLES = None  # Set to an integer (e.g., 100) to limit processing, or None for full dataset
 
 # Model Configuration
 VQ_MODEL = "VQ-8"  # Choices: VQ-16, VQ-8
