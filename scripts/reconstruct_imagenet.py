@@ -28,8 +28,8 @@ NUM_WORKERS = 4
 MAX_SAMPLES = None  # Set to an integer (e.g., 100) to limit processing, or None for full dataset
 
 # Model Configuration
-VQ_MODEL = "VQ-8"  # Choices: VQ-16, VQ-8
-VQ_CKPT = "/checkpoints/vq_ds8_c2i.pt"  # Update this path based on VQ_MODEL
+VQ_MODEL = "VQ-16"  # Choices: VQ-16, VQ-8
+VQ_CKPT = "/checkpoints/vq_ds16_c2i.pt"  # Update this path based on VQ_MODEL (ds8 or ds16)
 CODEBOOK_SIZE = 16384
 CODEBOOK_EMBED_DIM = 8
 
