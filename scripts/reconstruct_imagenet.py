@@ -23,7 +23,7 @@ DATASET_PATH = "/datasets/imagenet/val"  # Update this path
 SAMPLE_DIR = "reconstructions"
 IMAGE_SIZE = 256
 IMAGE_SIZE_EVAL = 256
-BATCH_SIZE = 32
+BATCH_SIZE = 64
 NUM_WORKERS = 4
 MAX_SAMPLES = None  # Set to an integer (e.g., 100) to limit processing, or None for full dataset
 
