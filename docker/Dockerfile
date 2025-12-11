@@ -67,3 +67,12 @@ WORKDIR /home/$USERNAME/exp
 #     -w /app \
 #     nasiri/llamagen:latest \
 #     python3 scripts/reconstruct_imagenet.py
+# eval via (change folder path accordingly):
+#     docker run --rm -it --gpus "device=0" --shm-size=8g \
+#   -v /home/nasiri/storage/vq-gan/taming-transformers:/ref \
+#   -v /home/nasiri/storage/llamagen/LlamaGen:/llamagen \
+#   -w /ref/eval \
+#   nasiri/evaluator:latest \
+#   python /ref/eval/evaluator.py \
+#   /llamagen/imagenet_val_gt_256.npz \
+#   /llamagen/reconstructions/VQ-16-imagenet-size-256-size-256-codebook-size-16384-dim-8-seed-0-ts-1765387998.npz

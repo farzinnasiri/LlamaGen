@@ -4,9 +4,6 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 from tqdm import tqdm
 import os
-import sys
-sys.path.append(os.getcwd())
-import time
 from PIL import Image
 import numpy as np
 
@@ -18,23 +15,30 @@ from dataset.build import build_dataset
 from tokenizer.tokenizer_image.vq_model import VQ_models
 from tokenizer.tokenizer_image.lpips import LPIPS
 
+# ==============================================================================
+#                               CONSTANTS
+# ==============================================================================
 # Data Configuration
-DATASET_PATH = "/datasets/imagenet/val"  # Update this path
+DATASET_PATH = "/path/to/imagenet_val"  # Update this path
 SAMPLE_DIR = "reconstructions"
 IMAGE_SIZE = 256
 IMAGE_SIZE_EVAL = 256
-BATCH_SIZE = 64
+BATCH_SIZE = 32
 NUM_WORKERS = 4
-MAX_SAMPLES = None  # Set to an integer (e.g., 100) to limit processing, or None for full dataset
 
 # Model Configuration
-VQ_MODEL = "VQ-16"  # Choices: VQ-16, VQ-8
-VQ_CKPT = "/checkpoints/vq_ds16_c2i.pt"  # Update this path based on VQ_MODEL (ds8 or ds16)
+VQ_MODEL = "VQ-8"  # Choices: VQ-16, VQ-8
+VQ_CKPT = "/path/to/vq_ckpt.pt"  # Update this path
 CODEBOOK_SIZE = 16384
 CODEBOOK_EMBED_DIM = 8
 
 # Experiment Configuration
 SEED = 0
+DEVICE = "cuda:0" if torch.cuda.is_available() else "cpu"
+
+# ==============================================================================
+#                           HELPER FUNCTIONS
+# ==============================================================================
 
 def create_npz_from_sample_folder(sample_dir, num=50000):
     """
@@ -64,15 +68,26 @@ def create_npz_from_sample_folder(sample_dir, num=50000):
     print(f"Saved .npz file to {npz_path} [shape={samples.shape}].")
     return npz_path
 
+# ==============================================================================
+#                               MAIN
+# ==============================================================================
 
 def main():
+    # --------------------------------------------------------------------------
+    # 1. Setup PyTorch and Device
+    # --------------------------------------------------------------------------
     torch.set_grad_enabled(False)
     torch.manual_seed(SEED)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if torch.cuda.is_available():
+        torch.cuda.set_device(DEVICE)
+        device = torch.device(DEVICE)
+    else:
+        device = torch.device("cpu")
     print(f"Running on {device} with seed {SEED}")
 
-
-    # Load VQ-VAE Model
+    # --------------------------------------------------------------------------
+    # 2. Load VQ-VAE Model
+    # --------------------------------------------------------------------------
     print(f"Loading {VQ_MODEL} model...")
     vq_model = VQ_models[VQ_MODEL](
         codebook_size=CODEBOOK_SIZE,
@@ -94,15 +109,18 @@ def main():
     vq_model.load_state_dict(model_weight)
     del checkpoint
 
-    # Setup Output Directory
-    stamp = str(int(time.time()))
+    # --------------------------------------------------------------------------
+    # 3. Setup Output Directory
+    # --------------------------------------------------------------------------
     folder_name = (f"{VQ_MODEL}-imagenet-size-{IMAGE_SIZE}-size-{IMAGE_SIZE_EVAL}"
-                   f"-codebook-size-{CODEBOOK_SIZE}-dim-{CODEBOOK_EMBED_DIM}-seed-{SEED}-ts-{stamp}")
+                   f"-codebook-size-{CODEBOOK_SIZE}-dim-{CODEBOOK_EMBED_DIM}-seed-{SEED}")
     sample_folder_dir = os.path.join(SAMPLE_DIR, folder_name)
     os.makedirs(sample_folder_dir, exist_ok=True)
     print(f"Saving samples to {sample_folder_dir}")
 
-    # Setup Data Loading
+    # --------------------------------------------------------------------------
+    # 4. Setup Data Loading
+    # --------------------------------------------------------------------------
     transform = transforms.Compose([
         transforms.Lambda(lambda pil_image: center_crop_arr(pil_image, IMAGE_SIZE)),
         transforms.ToTensor(),
@@ -127,7 +145,9 @@ def main():
     # Initialize LPIPS metric
     lpips_metric = LPIPS().to(device).eval()
 
-    # Reconstruction Loop
+    # --------------------------------------------------------------------------
+    # 5. Reconstruction Loop
+    # --------------------------------------------------------------------------
     psnr_val_rgb = []
     ssim_val_rgb = []
     mse_val_rgb = []
@@ -136,12 +156,7 @@ def main():
     total_samples = 0
     
     print("Starting reconstruction...")
-    # x is a single tensor of shape [B, C, H, W]
     for x, _ in tqdm(loader, desc="Processing Batches"):
-        if MAX_SAMPLES is not None and total_samples >= MAX_SAMPLES:
-            print(f"Reached MAX_SAMPLES limit ({MAX_SAMPLES}). Stopping.")
-            break
-
         # Handle image size evaluation mismatch (interpolation)
         if IMAGE_SIZE_EVAL != IMAGE_SIZE:
             rgb_gts = F.interpolate(x, size=(IMAGE_SIZE_EVAL, IMAGE_SIZE_EVAL), mode='bicubic')
@@ -194,7 +209,9 @@ def main():
             
         total_samples += len(x)
 
-    # Summary and Results
+    # --------------------------------------------------------------------------
+    # 6. Summary and Results
+    # --------------------------------------------------------------------------
     avg_psnr = sum(psnr_val_rgb) / len(psnr_val_rgb)
     avg_ssim = sum(ssim_val_rgb) / len(ssim_val_rgb)
     avg_mse = sum(mse_val_rgb) / len(mse_val_rgb)
@@ -206,7 +223,7 @@ def main():
     print(f"MSE: {avg_mse:.6f}")
     print(f"LPIPS: {avg_lpips:.6f}")
 
-    result_file = f"{sample_folder_dir}_results-{stamp}.txt"
+    result_file = f"{sample_folder_dir}_results.txt"
     print(f"Writing results to {result_file}")
     with open(result_file, 'w') as f:
         f.write(f"PSNR: {avg_psnr:.6f}\n")
@@ -214,7 +231,7 @@ def main():
         f.write(f"MSE: {avg_mse:.6f}\n")
         f.write(f"LPIPS: {avg_lpips:.6f}\n")
 
-    # Create NPZ file (for evalution)
+    # Create NPZ file (optional but requested to match reference)
     create_npz_from_sample_folder(sample_folder_dir, num=total_samples)
     print("Done.")
 
