@@ -24,7 +24,7 @@ from tokenizer.tokenizer_image.vq_model import VQ_models
 NOISE_STD_LOW = 0.1
 NOISE_STD_MID = 0.2
 NOISE_STD_HIGH = 0.5
-MAX_SAMPLES = 500 # Set to None to run on all samples, or an integer like 1000
+MAX_SAMPLES = None # Set to None to run on all samples, or an integer like 1000
 
 STAMP = int(time.time())
 OUTDIR = f"{STAMP}_robustness_dataset_llamagen"
