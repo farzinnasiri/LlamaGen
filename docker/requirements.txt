@@ -8,3 +8,4 @@ huggingface_hub
 jupyter
 tornado
 nbconvert
+matplotlib
