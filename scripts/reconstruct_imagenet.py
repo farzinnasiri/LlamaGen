@@ -27,8 +27,8 @@ BATCH_SIZE = 32
 NUM_WORKERS = 4
 
 # Model Configuration
-VQ_MODEL = "VQ-8"  # Choices: VQ-16, VQ-8
-VQ_CKPT = "/path/to/vq_ckpt.pt"  # Update this path
+VQ_MODEL = "VQ-16"  # Choices: VQ-16, VQ-8
+VQ_CKPT = "/path/to/vq_ds16_c2i.pt"  # Update this path
 CODEBOOK_SIZE = 16384
 CODEBOOK_EMBED_DIM = 8
 
