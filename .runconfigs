@@ -1,0 +1,7 @@
+# Docker run options
+docker_args: -v /home/nasiri/storage/llamagen/checkpoints:/checkpoints -v /home/nasiri/datasets/shared/imagenet:/datasets/imagenet -p 7676:8888
+# Specify the name of the container
+container_name: {user}_llamagen_GPU{args.gpu}_{date}
+
+# Specify the Docker image to use
+image_name: nasiri/llamagen:latest
