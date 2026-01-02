@@ -9,3 +9,4 @@ jupyter
 tornado
 nbconvert
 matplotlib
+pandas
