@@ -37,6 +37,20 @@ def get_env(name, default):
         return float(val)
     return val
 
+def get_env_float_list(name, default):
+    val = os.environ.get(name)
+    if val is None:
+        return list(default)
+    parts = [p.strip() for p in val.split(",")]
+    values = []
+    for part in parts:
+        if not part:
+            continue
+        values.append(float(part))
+    if not values:
+        raise ValueError(f"{name} must contain at least one float value")
+    return values
+
 NOISE_STD_LOW = 0.1
 NOISE_STD_MID = 0.25
 NOISE_STD_HIGH = 0.5
@@ -44,19 +58,25 @@ NOISE_STD_XHIGH = 1.0
 MAX_SAMPLES = None # Set to None to run on all samples, or an integer like 1000
 
 H2_DECODE_MAX_BATCH = get_env("H2_DECODE_MAX_BATCH", 64)
-NUM_SAVE_WORKERS = 16
+NUM_SAVE_WORKERS = get_env("NUM_SAVE_WORKERS", 16)
+SAVE_QUEUE_MAXSIZE = get_env("SAVE_QUEUE_MAXSIZE", NUM_SAVE_WORKERS * 32)
 
 EXPERIMENT_MODE = get_env("EXPERIMENT_MODE", "h1_patch_noise_encoder")
 PATCH_TOK_SIDE = 8
 PATCH_FRACTION = 0.25
 PATCH_PLACEMENT = "random"
 TOKEN_EDIT_MODES = ["random_uniform", "closest", "farthest", "orthogonal"]
+H2_PATCH_FRACTIONS = get_env_float_list("H2_PATCH_FRACTIONS", [0.10, 0.25, 0.50, 0.75])
 USE_BLACK_MASK_H1 = True
 
 SEED = 0
 
 STAMP = int(time.time())
-OUTDIR = f"{STAMP}_robustness_dataset_llamagen_{EXPERIMENT_MODE}_patch{PATCH_TOK_SIDE}_seed{SEED}"
+if EXPERIMENT_MODE == "h2_patch_token_edit_decoder":
+    h2_patch_tag = "-".join(f"{int(round(f * 100.0))}" for f in H2_PATCH_FRACTIONS)
+    OUTDIR = f"{STAMP}_robustness_dataset_llamagen_{EXPERIMENT_MODE}_patchsweep{h2_patch_tag}_seed{SEED}"
+else:
+    OUTDIR = f"{STAMP}_robustness_dataset_llamagen_{EXPERIMENT_MODE}_patch{PATCH_TOK_SIDE}_seed{SEED}"
 
 # Model Configuration
 VQ_MODEL = "VQ-16"  # Choices: VQ-16, VQ-8
@@ -110,7 +130,10 @@ def save_worker(worker_id, queue, output_dir):
                 os.makedirs(sample_dir, exist_ok=True)
                 
                 for entry in task["images"]:
-                    Image.fromarray(entry["array"]).save(os.path.join(sample_dir, entry["filename"]))
+                    Image.fromarray(entry["array"]).save(
+                        os.path.join(sample_dir, entry["filename"]),
+                        compress_level=1,
+                    )
 
                 metadata = dict(task["metadata"])
                 metadata.update({
@@ -174,7 +197,7 @@ class RobustnessDatasetGenerator:
         os.makedirs(self.images_dir, exist_ok=True)
         
         # Initialize Workers
-        self.queue = mp.Queue(maxsize=NUM_SAVE_WORKERS * 10) # Buffer size
+        self.queue = mp.Queue(maxsize=SAVE_QUEUE_MAXSIZE)
         self.workers = []
         print(f"Starting {NUM_SAVE_WORKERS} save workers...")
         for i in range(NUM_SAVE_WORKERS):
@@ -238,6 +261,22 @@ class RobustnessDatasetGenerator:
                 bboxes.append((int(j0), int(i0), int(j1), int(i1)))
             return bboxes
         raise ValueError(f"Unknown placement: {placement}")
+
+    def patch_side_from_fraction_tok(self, height_tok, width_tok, fraction):
+        side = int(round(math.sqrt(max(0.0, min(1.0, fraction))) * min(height_tok, width_tok)))
+        return max(1, min(side, height_tok, width_tok))
+
+    def shrink_bbox_tok_square(self, bbox_tok, target_side_tok):
+        j0, i0, j1, i1 = bbox_tok
+        source_side_tok = j1 - j0
+        target_side_tok = max(1, min(int(target_side_tok), source_side_tok))
+        dj = (source_side_tok - target_side_tok) // 2
+        di = (source_side_tok - target_side_tok) // 2
+        new_j0 = j0 + dj
+        new_i0 = i0 + di
+        new_j1 = new_j0 + target_side_tok
+        new_i1 = new_i0 + target_side_tok
+        return (int(new_j0), int(new_i0), int(new_j1), int(new_i1))
 
     def make_mask_from_bboxes_px(self, bboxes, height, width, device):
         mask = torch.zeros((len(bboxes), 1, height, width), device=device)
@@ -440,15 +479,40 @@ class RobustnessDatasetGenerator:
 
     def run_h2_patch_token_edit_decoder_experiment(self, x_clean, paths, batch_size, img_clean_uint8, rec_clean_uint8, ind_clean_flat, ind_clean_grid, height_tok, width_tok, quant_shape):
         height_px, width_px = x_clean.shape[2], x_clean.shape[3]
+        patch_fractions = [float(f) for f in H2_PATCH_FRACTIONS]
+        if not patch_fractions:
+            raise ValueError("H2_PATCH_FRACTIONS must contain at least one value")
+        if any(f <= 0.0 or f > 1.0 for f in patch_fractions):
+            raise ValueError("H2_PATCH_FRACTIONS values must be in (0, 1]")
 
-        if PATCH_TOK_SIDE is None:
-            side_tok = int(round(math.sqrt(max(0.0, min(1.0, PATCH_FRACTION))) * min(height_tok, width_tok)))
-            patch_side_tok = max(1, min(side_tok, height_tok, width_tok))
-        else:
-            patch_side_tok = max(1, min(int(PATCH_TOK_SIDE), height_tok, width_tok))
+        patch_fraction_labels = [int(round(f * 100.0)) for f in patch_fractions]
+        if len(set(patch_fraction_labels)) != len(patch_fraction_labels):
+            raise ValueError("H2_PATCH_FRACTIONS contains duplicate percentage labels after rounding")
 
-        bboxes_tok = self.sample_patch_bboxes_tok_square(batch_size, height_tok, width_tok, patch_side_tok, PATCH_PLACEMENT)
-        bboxes_px = [self.bbox_tok_to_bbox_px(b, height_px, width_px, height_tok, width_tok) for b in bboxes_tok]
+        patch_side_by_fraction = {
+            fraction: self.patch_side_from_fraction_tok(height_tok, width_tok, fraction)
+            for fraction in patch_fractions
+        }
+        largest_fraction = max(patch_fractions, key=lambda f: patch_side_by_fraction[f])
+        largest_side_tok = patch_side_by_fraction[largest_fraction]
+
+        anchor_bboxes_tok = self.sample_patch_bboxes_tok_square(
+            batch_size,
+            height_tok,
+            width_tok,
+            largest_side_tok,
+            PATCH_PLACEMENT,
+        )
+        bboxes_tok_by_fraction = {}
+        bboxes_px_by_fraction = {}
+        for fraction in patch_fractions:
+            side_tok = patch_side_by_fraction[fraction]
+            bboxes_tok = [self.shrink_bbox_tok_square(bbox, side_tok) for bbox in anchor_bboxes_tok]
+            bboxes_tok_by_fraction[fraction] = bboxes_tok
+            bboxes_px_by_fraction[fraction] = [
+                self.bbox_tok_to_bbox_px(b, height_px, width_px, height_tok, width_tok)
+                for b in bboxes_tok
+            ]
 
         if not isinstance(TOKEN_EDIT_MODES, (list, tuple)):
             raise ValueError("TOKEN_EDIT_MODES must be a list or tuple")
@@ -468,33 +532,37 @@ class RobustnessDatasetGenerator:
         ind_edits_flat = []
         ind_edits_cpu = {}
 
-        for mode in token_edit_modes:
-            ind_edit_grid = ind_clean_grid.clone()
-            for bi, (j0, i0, j1, i1) in enumerate(bboxes_tok):
-                if mode == "random_uniform":
-                    rand_patch = torch.randint(
-                        low=0,
-                        high=int(CODEBOOK_SIZE),
-                        size=(i1 - i0, j1 - j0),
-                        device=ind_edit_grid.device,
-                    )
-                    ind_edit_grid[bi, i0:i1, j0:j1] = rand_patch
-                else:
-                    if mode == "closest":
-                        map_key = "min_dist_idx"
-                    elif mode == "farthest":
-                        map_key = "max_dist_idx"
+        variant_specs = []
+        for fraction in patch_fractions:
+            bboxes_tok = bboxes_tok_by_fraction[fraction]
+            for mode in token_edit_modes:
+                ind_edit_grid = ind_clean_grid.clone()
+                for bi, (j0, i0, j1, i1) in enumerate(bboxes_tok):
+                    if mode == "random_uniform":
+                        rand_patch = torch.randint(
+                            low=0,
+                            high=int(CODEBOOK_SIZE),
+                            size=(i1 - i0, j1 - j0),
+                            device=ind_edit_grid.device,
+                        )
+                        ind_edit_grid[bi, i0:i1, j0:j1] = rand_patch
                     else:
-                        map_key = "ortho_idx"
-                    patch = ind_edit_grid[bi, i0:i1, j0:j1]
-                    mapped = relations[map_key][patch]
-                    if (mapped < 0).any():
-                        raise RuntimeError("Codebook relations mapping produced invalid indices (<0)")
-                    ind_edit_grid[bi, i0:i1, j0:j1] = mapped
+                        if mode == "closest":
+                            map_key = "min_dist_idx"
+                        elif mode == "farthest":
+                            map_key = "max_dist_idx"
+                        else:
+                            map_key = "ortho_idx"
+                        patch = ind_edit_grid[bi, i0:i1, j0:j1]
+                        mapped = relations[map_key][patch]
+                        if (mapped < 0).any():
+                            raise RuntimeError("Codebook relations mapping produced invalid indices (<0)")
+                        ind_edit_grid[bi, i0:i1, j0:j1] = mapped
 
-            ind_edit_flat = ind_edit_grid.reshape(batch_size, -1)
-            ind_edits_flat.append(ind_edit_flat)
-            ind_edits_cpu[mode] = ind_edit_flat.detach().cpu().numpy()
+                ind_edit_flat = ind_edit_grid.reshape(batch_size, -1)
+                ind_edits_flat.append(ind_edit_flat)
+                ind_edits_cpu[(fraction, mode)] = ind_edit_flat.detach().cpu().numpy()
+                variant_specs.append((fraction, mode))
 
         ind_all = torch.cat(ind_edits_flat, dim=0)
         max_decode_batch = int(H2_DECODE_MAX_BATCH)
@@ -509,9 +577,9 @@ class RobustnessDatasetGenerator:
         rec_all = torch.cat(rec_chunks, dim=0)
         rec_all_uint8 = batch_to_uint8_hwc(rec_all)
 
-        rec_by_mode = {}
-        for mi, mode in enumerate(token_edit_modes):
-            rec_by_mode[mode] = rec_all_uint8[mi * batch_size : (mi + 1) * batch_size]
+        rec_by_variant = {}
+        for vi, variant in enumerate(variant_specs):
+            rec_by_variant[variant] = rec_all_uint8[vi * batch_size : (vi + 1) * batch_size]
 
         ind_clean_cpu = ind_clean_flat.detach().cpu().numpy()
 
@@ -520,21 +588,40 @@ class RobustnessDatasetGenerator:
                 {"filename": "0_original.png", "array": img_clean_uint8[i]},
                 {"filename": "1_recon_clean.png", "array": rec_clean_uint8[i]},
             ]
-            for mode in token_edit_modes:
-                images.append({"filename": f"2_recon_token_edit_{mode}.png", "array": rec_by_mode[mode][i]})
+            image_index = 2
+            patch_metadata = {}
+            indices_edit_by_fraction = {}
+            for fraction in patch_fractions:
+                fraction_label = int(round(fraction * 100.0))
+                bbox_tok = bboxes_tok_by_fraction[fraction][i]
+                bbox_px = bboxes_px_by_fraction[fraction][i]
+                patch_side_tok = patch_side_by_fraction[fraction]
+                actual_fraction = (patch_side_tok * patch_side_tok) / float(height_tok * width_tok)
+                patch_metadata[str(fraction_label)] = {
+                    "target_fraction": float(fraction),
+                    "actual_fraction": float(actual_fraction),
+                    "patch_side_tok": int(patch_side_tok),
+                    "patch_bbox_tok": list(map(int, bbox_tok)),
+                    "patch_bbox_px": list(map(int, bbox_px)),
+                }
+                indices_edit_by_fraction[str(fraction_label)] = {}
+                for mode in token_edit_modes:
+                    images.append({
+                        "filename": f"{image_index}_recon_token_edit_patch{fraction_label}_{mode}.png",
+                        "array": rec_by_variant[(fraction, mode)][i],
+                    })
+                    indices_edit_by_fraction[str(fraction_label)][mode] = ind_edits_cpu[(fraction, mode)][i].tolist()
+                    image_index += 1
 
             metadata = {
                 "experiment_mode": EXPERIMENT_MODE,
                 "token_edit_modes": list(token_edit_modes),
                 "token_grid_hw": [int(height_tok), int(width_tok)],
-                "patch_bbox_px": list(map(int, bboxes_px[i])),
-                "patch_bbox_tok": list(map(int, bboxes_tok[i])),
+                "patch_fraction_sweep": [float(f) for f in patch_fractions],
+                "patches_by_fraction": patch_metadata,
                 "indices_clean": ind_clean_cpu[i].tolist(),
-                "indices_edit_by_mode": {m: ind_edits_cpu[m][i].tolist() for m in token_edit_modes},
+                "indices_edit_by_fraction_and_mode": indices_edit_by_fraction,
             }
-            if len(token_edit_modes) == 1:
-                metadata["token_edit_mode"] = token_edit_modes[0]
-                metadata["indices_edit"] = ind_edits_cpu[token_edit_modes[0]][i].tolist()
 
             task = {"original_path": original_path, "images": images, "metadata": metadata}
             self.queue.put(task)
@@ -580,7 +667,11 @@ def main():
     print(f"Noise Levels: Low={NOISE_STD_LOW}, Mid={NOISE_STD_MID}, High={NOISE_STD_HIGH}, XHigh={NOISE_STD_XHIGH}")
     if EXPERIMENT_MODE == "h1_patch_noise_encoder":
         print(f"H1 Black Mask (Occlusion): {USE_BLACK_MASK_H1}")
-    print(f"Patch Fraction: {PATCH_FRACTION}, Patch Placement: {PATCH_PLACEMENT}")
+    if EXPERIMENT_MODE == "h2_patch_token_edit_decoder":
+        print(f"H2 Patch Fractions: {H2_PATCH_FRACTIONS}, Patch Placement: {PATCH_PLACEMENT}")
+    else:
+        print(f"Patch Fraction: {PATCH_FRACTION}, Patch Placement: {PATCH_PLACEMENT}")
+    print(f"Save Workers: {NUM_SAVE_WORKERS}, Save Queue Maxsize: {SAVE_QUEUE_MAXSIZE}")
     
     # 1. Setup PyTorch and Device
     torch.set_grad_enabled(False)
