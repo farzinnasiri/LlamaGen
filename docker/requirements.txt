@@ -10,3 +10,4 @@ tornado
 nbconvert
 matplotlib
 pandas
+lpips
