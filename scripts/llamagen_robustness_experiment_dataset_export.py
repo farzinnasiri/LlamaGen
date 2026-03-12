@@ -86,7 +86,7 @@ CODEBOOK_EMBED_DIM = 8
 CODEBOOK_RELATIONS_NPZ_PATH = get_env("CODEBOOK_RELATIONS_NPZ_PATH", "llamagen_codebook_relations.npz")
 
 # Data Configuration
-DATASET_PATH = "/datasets/imagenet/val"
+DATASET_PATH = get_env("DATASET_PATH", "/datasets/imagenet/val")
 IMAGE_SIZE = 256
 BATCH_SIZE = 32
 NUM_WORKERS = 8
@@ -146,7 +146,7 @@ def save_worker(worker_id, queue, output_dir):
                 print(f"Worker {worker_id} error processing {original_path}: {e}")
 
 def gather_val_paths(root):
-    exts = ("*.JPEG","*.JPG","*.jpg", "*.png")
+    exts = ("*.JPEG","*.JPG","*.jpeg","*.jpg", "*.png")
     # Assuming ImageNet structure: root/class_id/image.ext
     classes = sorted([d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d))])
     paths = []
