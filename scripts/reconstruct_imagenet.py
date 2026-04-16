@@ -19,7 +19,7 @@ from tokenizer.tokenizer_image.lpips import LPIPS
 from tokenizer.tokenizer_image.vq_model import VQ_models
 
 
-VALID_IMAGE_EXTENSIONS = {".jpeg", ".jpg", ".png", ".bmp", ".webp"}
+VALID_IMAGE_EXTENSIONS = {".jpeg", ".jpg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
 
 
 def parse_args():
